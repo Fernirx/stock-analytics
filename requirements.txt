@@ -1,0 +1,14 @@
+--extra-index-url https://vnstocks.com/api/packages
+vnstock
+pandas
+requests
+kafka-python-ng
+clickhouse-connect
+fastapi
+uvicorn[standard]
+websockets
+pydantic
+pydantic-settings
+python-dotenv
+pytest
+httpx
