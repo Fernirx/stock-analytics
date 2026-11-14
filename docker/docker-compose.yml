@@ -1,3 +1,5 @@
+name: stock-analytics
+
 services:
   app:
     build:
