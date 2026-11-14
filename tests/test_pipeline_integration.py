@@ -1,6 +1,12 @@
 import json
+import os
+import sys
 import time
 from datetime import datetime
+
+# Đảm bảo import được module app khi chạy file trực tiếp
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import pytest
 import requests
 from app.core.config import settings
