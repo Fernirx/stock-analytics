@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Market Intelligence Terminal</title>
+    <!-- TradingView Lightweight Charts & Apache ECharts -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        :root {
+            --bg-base: #080a0f;
+            --bg-card: #10141f;
+            --bg-card-hover: #151b2a;
+            --border: #1b2233;
+            --text-main: #f0f4fc;
+            --text-muted: #798399;
+            --buy: #00c087;
+            --sell: #ff3b53;
+            --accent: #2962ff;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+        header {
+            background: linear-gradient(180deg, #131826 0%, var(--bg-card) 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .brand-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #2962ff, #7000ff);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-size: 16px;
+            color: #fff;
+            box-shadow: 0 0 15px rgba(41, 98, 255, 0.4);
+        }
+        .brand-name {
+            font-size: 17px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            color: #fff;
+        }
+        .live-tag {
+            background: rgba(0, 192, 135, 0.15);
+            color: var(--buy);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid rgba(0, 192, 135, 0.3);
+        }
+        .live-dot {
+            width: 7px;
+            height: 7px;
+            background-color: var(--buy);
+            border-radius: 50%;
+            animation: pulse 1.8s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.4); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+        .symbol-nav {
+            display: flex;
+            gap: 8px;
+        }
+        .nav-btn {
+            background: #171d2c;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 7px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+        .nav-btn:hover {
+            color: #fff;
+            border-color: #2e3852;
+            background: #1e2638;
+        }
+        .nav-btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+            box-shadow: 0 0 12px rgba(41, 98, 255, 0.4);
+        }
+        .dashboard-body {
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-width: 1800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* 1. KPI CARDS */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .kpi-card:hover {
+            border-color: #2e3852;
+            transform: translateY(-2px);
+        }
+        .kpi-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .kpi-value-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+        }
+        .kpi-value {
+            font-size: 26px;
+            font-weight: 800;
+            font-family: monospace;
+            color: #fff;
+        }
+        .kpi-badge {
+            font-size: 12px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+        .kpi-badge.up { background: rgba(0, 192, 135, 0.15); color: var(--buy); }
+        .kpi-badge.down { background: rgba(255, 59, 83, 0.15); color: var(--sell); }
+        .kpi-bar {
+            height: 4px;
+            background: #202738;
+            border-radius: 2px;
+            overflow: hidden;
+            display: flex;
+            margin-top: 4px;
+        }
+        .kpi-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        /* 2. MAIN CHARTS ROW */
+        .main-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        .chart-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 12px;
+        }
+        .panel-title {
+            font-size: 14px;
+            font-weight: 800;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+        .timeframe-group {
+            display: flex;
+            gap: 4px;
+        }
+        .tf-btn {
+            background: #171d2c;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .tf-btn.active {
+            background: #232c40;
+            color: #fff;
+            border-color: var(--accent);
+        }
+        #candle-chart {
+            width: 100%;
+            height: 420px;
+        }
+        .side-charts {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .mini-chart {
+            height: 195px;
+            width: 100%;
+        }
+
+        /* 3. BOTTOM ADVANCED ROW */
+        .bottom-row {
+            display: grid;
+            grid-template-columns: 1.3fr 1fr 1fr;
+            gap: 20px;
+        }
+        .advanced-chart {
+            height: 300px;
+            width: 100%;
+        }
+        .tape-header {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr 1fr;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            padding: 6px 12px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 4px;
+        }
+        .trades-container {
+            height: 270px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding-right: 2px;
+        }
+        .trade-row {
+            background: transparent;
+            padding: 5px 12px;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr 1fr;
+            align-items: center;
+            font-size: 12px;
+            font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
+            border-radius: 4px;
+            transition: background 0.15s ease;
+        }
+        .trade-row:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .trade-price {
+            font-weight: 700;
+        }
+        .trade-row.buy .trade-price {
+            color: var(--buy);
+        }
+        .trade-row.sell .trade-price {
+            color: var(--sell);
+        }
+        .trade-qty {
+            text-align: right;
+            color: #cbd5e1;
+        }
+        .trade-time {
+            text-align: right;
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+        @keyframes flashBuy {
+            0% { background: rgba(0, 192, 135, 0.45); }
+            100% { background: transparent; }
+        }
+        @keyframes flashSell {
+            0% { background: rgba(255, 59, 83, 0.45); }
+            100% { background: transparent; }
+        }
+        .trade-row.flash-buy {
+            animation: flashBuy 0.8s ease-out;
+        }
+        .trade-row.flash-sell {
+            animation: flashSell 0.8s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <div class="brand-icon">M</div>
+            <div class="brand-name">MARKET INTELLIGENCE TERMINAL</div>
+            <div class="live-tag">
+                <span class="live-dot"></span>
+                <span>THỊ TRƯỜNG TRỰC TIẾP</span>
+            </div>
+        </div>
+        <div class="symbol-nav" id="symbol-nav">
+            <!-- Nav buttons injected by JS -->
+        </div>
+    </header>
+
+    <div class="dashboard-body">
+        <!-- 1. KPI CARDS -->
+        <section class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-title">Giá Khớp Gần Nhất</div>
+                <div class="kpi-value-row">
+                    <div class="kpi-value" id="kpi-last-price">0.00 USDT</div>
+                    <div class="kpi-badge up" id="kpi-change">+0.00%</div>
+                </div>
+                <div class="panel-subtitle" id="kpi-range">Biên độ: 0.00 - 0.00 USDT</div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-title">Giá Bình Quân (VWAP)</div>
+                <div class="kpi-value-row">
+                    <div class="kpi-value" id="kpi-vwap">0.00 USDT</div>
+                </div>
+                <div class="panel-subtitle">Chỉ báo trọng số thanh khoản (USDT)</div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-title">Tổng Khối Lượng (Volume)</div>
+                <div class="kpi-value-row">
+                    <div class="kpi-value" id="kpi-volume">0</div>
+                    <div class="panel-subtitle" id="kpi-trades">0 lệnh</div>
+                </div>
+                <div class="kpi-bar"><div class="kpi-bar-fill" style="width: 75%;"></div></div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-title">Áp Lực Mua / Bán (Order Flow)</div>
+                <div class="kpi-value-row">
+                    <div class="kpi-value" style="color: var(--buy);" id="kpi-buy-ratio">50% Mua</div>
+                    <div class="kpi-value" style="color: var(--sell); font-size: 16px;" id="kpi-sell-ratio">50% Bán</div>
+                </div>
+                <div class="kpi-bar">
+                    <div id="buy-ratio-bar" style="background: var(--buy); width: 50%; height: 100%;"></div>
+                    <div id="sell-ratio-bar" style="background: var(--sell); width: 50%; height: 100%;"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. MAIN CHARTS ROW -->
+        <section class="main-row">
+            <!-- Left: Candlestick & Timeseries -->
+            <div class="chart-panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title" id="chart-symbol-title">BTC/USDT · Biểu Đồ Nến Kỹ Thuật (Candlestick)</div>
+                        <div class="panel-subtitle">Nến OHLCV thời gian thực đồng bộ sàn Binance · Đơn vị: USDT</div>
+                    </div>
+                    <div class="timeframe-group">
+                        <button class="tf-btn active" onclick="switchTimeframe('1m', this)">1m</button>
+                        <button class="tf-btn" onclick="switchTimeframe('5m', this)">5m</button>
+                        <button class="tf-btn" onclick="switchTimeframe('15m', this)">15m</button>
+                        <button class="tf-btn" onclick="switchTimeframe('1h', this)">1h</button>
+                    </div>
+                </div>
+                <div id="candle-chart"></div>
+            </div>
+
+            <!-- Right: Bar chart & Pie chart -->
+            <div class="side-charts">
+                <!-- Bar chart: Top Volume -->
+                <div class="chart-panel">
+                    <div class="panel-header" style="margin-bottom: 6px; padding-bottom: 8px;">
+                        <div class="panel-title">Xếp Hạng Thanh Khoản (Top Turnover)</div>
+                    </div>
+                    <div id="top-bar-chart" class="mini-chart"></div>
+                </div>
+
+                <!-- Pie chart: Buy vs Sell -->
+                <div class="chart-panel">
+                    <div class="panel-header" style="margin-bottom: 6px; padding-bottom: 8px;">
+                        <div class="panel-title">Tỷ Trọng Cung - Cầu (Buy / Sell Pie)</div>
+                    </div>
+                    <div id="pie-chart" class="mini-chart"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. ADVANCED ROW: SANKEY, DISTRIBUTION & LIVE TRADES -->
+        <section class="bottom-row">
+            <!-- Sankey Diagram -->
+            <div class="chart-panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">Sơ Đồ Dòng Tiền Thị Trường (Sankey Flow)</div>
+                        <div class="panel-subtitle">Luân chuyển khối lượng: Thị Trường ➔ Cặp Giao Dịch ➔ Lệnh Mua / Bán</div>
+                    </div>
+                </div>
+                <div id="sankey-chart" class="advanced-chart"></div>
+            </div>
+
+            <!-- Price Distribution -->
+            <div class="chart-panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">Phân Bổ Vùng Giá (Price Distribution)</div>
+                        <div class="panel-subtitle">Mật độ khối lượng tập trung theo bước giá (USDT)</div>
+                    </div>
+                </div>
+                <div id="dist-chart" class="advanced-chart"></div>
+            </div>
+
+            <!-- Live Trades Tape -->
+            <div class="chart-panel">
+                <div class="panel-header" style="margin-bottom: 6px; padding-bottom: 8px;">
+                    <div>
+                        <div class="panel-title" id="tape-symbol-title">Thị Trường Giao Dịch (BTC/USDT)</div>
+                        <div class="panel-subtitle">Sổ khớp lệnh trực tiếp từ sàn Binance</div>
+                    </div>
+                    <div class="live-tag" style="padding: 4px 10px; font-size: 11px;">
+                        <span class="live-dot"></span>
+                    </div>
+                </div>
+                <div class="tape-header">
+                    <span>Giá (USDT)</span>
+                    <span style="text-align: right;" id="tape-vol-header">Số lượng (BTC)</span>
+                    <span style="text-align: right;">Thời gian</span>
+                </div>
+                <div class="trades-container" id="trades-tape">
+                    <!-- Live trades injected here -->
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        let currentSymbol = "BTCUSDT";
+        let currentTimeframe = "1m";
+        let tvChart = null;
+        let candleSeries = null;
+        let topBarChart = null;
+        let pieChart = null;
+        let sankeyChart = null;
+        let distChart = null;
+        let ws = null;
+
+        // Format helpers
+        function formatPrice(val) {
+            const num = Number(val || 0);
+            const decimals = (num > 0 && num < 0.1) ? 5 : ((num >= 0.1 && num < 1.0) ? 4 : 2);
+            return num.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        }
+
+        function formatQty(val, symbol) {
+            const num = Number(val || 0);
+            if (!symbol) return num.toFixed(4);
+            if (symbol.startsWith("BTC")) return num.toFixed(5);
+            if (symbol.startsWith("ETH")) return num.toFixed(4);
+            if (symbol.startsWith("SOL") || symbol.startsWith("AVAX")) return num.toFixed(3);
+            if (symbol.startsWith("DOGE") || symbol.startsWith("XRP") || symbol.startsWith("ADA")) return num.toFixed(1);
+            return num.toFixed(3);
+        }
+
+        function getPrecisionForSymbol(symbol) {
+            if (!symbol) return { precision: 2, minMove: 0.01 };
+            if (symbol.startsWith("DOGE") || symbol.startsWith("ADA")) return { precision: 5, minMove: 0.00001 };
+            if (symbol.startsWith("XRP") || symbol.startsWith("AVAX")) return { precision: 4, minMove: 0.0001 };
+            if (symbol.startsWith("SOL")) return { precision: 2, minMove: 0.01 };
+            return { precision: 2, minMove: 0.01 };
+        }
+
+        // Initialize TradingView Candlestick
+        function initCandleChart() {
+            const container = document.getElementById("candle-chart");
+            tvChart = LightweightCharts.createChart(container, {
+                layout: { background: { color: "#10141f" }, textColor: "#94a3b8" },
+                grid: { vertLines: { color: "#182030" }, horzLines: { color: "#182030" } },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                rightPriceScale: { 
+                    borderColor: "#1e293b",
+                    autoScale: true,
+                    scaleMargins: { top: 0.12, bottom: 0.12 },
+                    alignLabels: true
+                },
+                timeScale: { 
+                    borderColor: "#1e293b", 
+                    timeVisible: true, 
+                    secondsVisible: false 
+                },
+                localization: {
+                    priceFormatter: (p) => formatPrice(p) + " USDT"
+                }
+            });
+            const pFormat = getPrecisionForSymbol(currentSymbol);
+            candleSeries = tvChart.addCandlestickSeries({
+                upColor: "#00c087", downColor: "#ff3b53",
+                borderVisible: false, 
+                wickUpColor: "#00c087", wickDownColor: "#ff3b53",
+                priceLineVisible: true,
+                lastValueVisible: true,
+                priceLineColor: "#2962ff",
+                priceLineStyle: LightweightCharts.LineStyle.Dashed,
+                priceFormat: {
+                    type: 'price',
+                    precision: pFormat.precision,
+                    minMove: pFormat.minMove,
+                }
+            });
+            window.addEventListener("resize", () => {
+                tvChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+            });
+        }
+
+        // Initialize ECharts instances
+        function initECharts() {
+            topBarChart = echarts.init(document.getElementById("top-bar-chart"), "dark");
+            pieChart = echarts.init(document.getElementById("pie-chart"), "dark");
+            sankeyChart = echarts.init(document.getElementById("sankey-chart"), "dark");
+            distChart = echarts.init(document.getElementById("dist-chart"), "dark");
+
+            window.addEventListener("resize", () => {
+                topBarChart.resize();
+                pieChart.resize();
+                sankeyChart.resize();
+                distChart.resize();
+            });
+        }
+
+        // Fetch Symbols
+        async function fetchSymbols() {
+            try {
+                const res = await fetch("/api/v1/market-data/symbols");
+                const data = await res.json();
+                const nav = document.getElementById("symbol-nav");
+                nav.innerHTML = "";
+                data.symbols.forEach(sym => {
+                    const btn = document.createElement("button");
+                    const coin = sym.replace("USDT", "");
+                    btn.className = `nav-btn ${sym === currentSymbol ? "active" : ""}`;
+                    btn.textContent = coin;
+                    btn.onclick = () => switchSymbol(sym);
+                    nav.appendChild(btn);
+                });
+            } catch (e) {
+                console.error("Lỗi tải symbols:", e);
+            }
+        }
+
+        // Switch Timeframe
+        function switchTimeframe(tf, btn) {
+            currentTimeframe = tf;
+            document.querySelectorAll(".tf-btn").forEach(b => b.classList.remove("active"));
+            if (btn) btn.classList.add("active");
+            fetchCandles(currentSymbol, currentTimeframe, true);
+        }
+
+        // Fetch Candles
+        async function fetchCandles(symbol, tf = currentTimeframe, isInit = false) {
+            try {
+                const res = await fetch(`/api/v1/market-data/candles/${symbol}?timeframe=${tf}`);
+                const json = await res.json();
+                if (json.data && json.data.length > 0) {
+                    if (isInit) {
+                        candleSeries.setData(json.data);
+                        tvChart.timeScale().fitContent();
+                    } else {
+                        // Cập nhật nến mới nhất
+                        const latest = json.data[json.data.length - 1];
+                        candleSeries.update(latest);
+                    }
+                }
+            } catch (e) {
+                console.error("Lỗi tải nến:", e);
+            }
+        }
+
+        // Fetch Full Analytics Overview
+        async function fetchAnalytics(symbol) {
+            try {
+                const res = await fetch(`/api/v1/analytics/overview?symbol=${symbol}`);
+                const data = await res.json();
+
+                // 1. Update KPI Cards
+                const k = data.kpi;
+                document.getElementById("kpi-last-price").textContent = `${formatPrice(k.last_price)} USDT`;
+                const changeEl = document.getElementById("kpi-change");
+                changeEl.textContent = `${k.price_change_pct >= 0 ? '+' : ''}${k.price_change_pct}%`;
+                changeEl.className = `kpi-badge ${k.price_change_pct >= 0 ? 'up' : 'down'}`;
+                document.getElementById("kpi-range").textContent = `Biên độ: ${formatPrice(k.min_price)} - ${formatPrice(k.max_price)} USDT`;
+                document.getElementById("kpi-vwap").textContent = `${formatPrice(k.vwap)} USDT`;
+                document.getElementById("kpi-volume").textContent = Number(k.total_volume).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
+                document.getElementById("kpi-trades").textContent = `${k.total_trades} lệnh`;
+
+                const tot = (k.buy_vol + k.sell_vol) || 1;
+                const buyPct = Math.round(k.buy_vol / tot * 100);
+                const sellPct = 100 - buyPct;
+                document.getElementById("kpi-buy-ratio").textContent = `${buyPct}% Mua`;
+                document.getElementById("kpi-sell-ratio").textContent = `${sellPct}% Bán`;
+                document.getElementById("buy-ratio-bar").style.width = `${buyPct}%`;
+                document.getElementById("sell-ratio-bar").style.width = `${sellPct}%`;
+
+                // 2. Update Top Bar Chart
+                const topSymbols = data.top_ranking || [];
+                topBarChart.setOption({
+                    backgroundColor: "transparent",
+                    tooltip: {
+                        trigger: "axis",
+                        axisPointer: { type: "shadow" },
+                        formatter: (params) => {
+                            const p = params[0];
+                            return `Mã: <b>${p.name}/USDT</b><br/>Giá trị thanh khoản: <b>${Number(p.value).toLocaleString('en-US', {maximumFractionDigits: 0})} USDT</b>`;
+                        }
+                    },
+                    grid: { top: 10, bottom: 20, left: 55, right: 80 },
+                    xAxis: {
+                        type: "value",
+                        splitLine: { lineStyle: { color: "#1c2436" } },
+                        axisLabel: {
+                            formatter: (v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`,
+                            color: "#798399",
+                            fontSize: 9
+                        }
+                    },
+                    yAxis: { 
+                        type: "category", 
+                        data: topSymbols.map(s => s.symbol.replace("USDT", "")).reverse(), 
+                        axisLine: { lineStyle: { color: "#798399" } },
+                        axisLabel: { color: "#cbd5e1", fontWeight: "bold", fontSize: 11 }
+                    },
+                    series: [{
+                        type: "bar",
+                        data: topSymbols.map(s => s.volume).reverse(),
+                        label: {
+                            show: true,
+                            position: "right",
+                            formatter: (params) => `${Number(params.value).toLocaleString('en-US', {maximumFractionDigits: 0})} USDT`,
+                            color: "#94a3b8",
+                            fontSize: 10,
+                            fontWeight: "bold"
+                        },
+                        itemStyle: { 
+                            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                                { offset: 0, color: '#1e3a8a' },
+                                { offset: 1, color: '#2563eb' }
+                            ]),
+                            borderRadius: [0, 4, 4, 0] 
+                        }
+                    }]
+                }, true);
+
+                // 3. Update Pie / Donut Chart
+                pieChart.setOption({
+                    backgroundColor: "transparent",
+                    tooltip: { trigger: "item" },
+                    legend: { bottom: 0, textStyle: { color: "#798399" } },
+                    series: [{
+                        type: "pie",
+                        radius: ["45%", "70%"],
+                        avoidLabelOverlap: false,
+                        itemStyle: { borderRadius: 6, borderColor: "#10141f", borderWidth: 2 },
+                        label: { show: false },
+                        data: [
+                            { value: k.buy_vol, name: "Mua (Buy)", itemStyle: { color: "#00c087" } },
+                            { value: k.sell_vol, name: "Bán (Sell)", itemStyle: { color: "#ff3b53" } }
+                        ]
+                    }]
+                }, true);
+
+                // 4. Update Sankey Diagram
+                const sk = data.sankey;
+                if (sk && sk.links && sk.links.length > 0) {
+                    sankeyChart.setOption({
+                        backgroundColor: "transparent",
+                        tooltip: { trigger: "item", triggerOn: "mousemove" },
+                        series: [{
+                            type: "sankey",
+                            layout: "none",
+                            emphasis: { focus: "adjacency" },
+                            nodeAlign: "left",
+                            data: sk.nodes,
+                            links: sk.links,
+                            lineStyle: { color: "gradient", opacity: 0.35, curveness: 0.5 },
+                            itemStyle: { color: "#2962ff", borderColor: "#10141f" },
+                            label: { color: "#e0e6f5", fontSize: 11 }
+                        }]
+                    }, true);
+                }
+
+                // 5. Update Distribution Histogram
+                const dist = data.distribution || [];
+                distChart.setOption({
+                    backgroundColor: "transparent",
+                    grid: { top: 20, bottom: 40, left: 50, right: 10 },
+                    tooltip: { 
+                        trigger: "axis",
+                        axisPointer: { type: "shadow" },
+                        formatter: (params) => {
+                            const p = params[0];
+                            return `Vùng giá: <b>${p.name} USDT</b><br/>Khối lượng: <b>${Number(p.value).toLocaleString()}</b>`;
+                        }
+                    },
+                    xAxis: {
+                        type: "category",
+                        data: dist.map(d => formatPrice(d.price)),
+                        axisLabel: { 
+                            color: "#94a3b8", 
+                            fontSize: 10,
+                            rotate: dist.length > 5 ? 20 : 0
+                        }
+                    },
+                    yAxis: { 
+                        type: "value", 
+                        splitLine: { lineStyle: { color: "#1c2436" } },
+                        axisLabel: {
+                            formatter: (v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`,
+                            color: "#798399",
+                            fontSize: 9
+                        }
+                    },
+                    series: [{
+                        type: "bar",
+                        data: dist.map(d => d.volume),
+                        itemStyle: { 
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: '#818cf8' },
+                                { offset: 1, color: '#4f46e5' }
+                            ]),
+                            borderRadius: [4, 4, 0, 0] 
+                        }
+                    }]
+                }, true);
+
+            } catch (e) {
+                console.error("Lỗi nạp phân tích:", e);
+            }
+        }
+
+        // Switch symbol handler
+        function switchSymbol(symbol) {
+            currentSymbol = symbol;
+            const coin = symbol.replace("USDT", "");
+            document.querySelectorAll(".nav-btn").forEach(b => {
+                b.classList.toggle("active", b.textContent === coin);
+            });
+            document.getElementById("chart-symbol-title").textContent = `${coin}/USDT · Biểu Đồ Nến Kỹ Thuật (Candlestick)`;
+            
+            // Cập nhật độ chính xác thước đo giá
+            const pFormat = getPrecisionForSymbol(symbol);
+            candleSeries.applyOptions({
+                priceFormat: {
+                    type: 'price',
+                    precision: pFormat.precision,
+                    minMove: pFormat.minMove,
+                }
+            });
+
+            fetchCandles(symbol, currentTimeframe, true);
+            fetchAnalytics(symbol);
+            fetchTradesForSymbol(symbol);
+        }
+
+        // Connect WebSocket
+        function connectWebSocket() {
+            const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+            ws = new WebSocket(`${proto}//${window.location.host}/api/v1/market-data/ws`);
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === "ticks" && msg.data) {
+                    appendTrades(msg.data);
+                }
+            };
+
+            ws.onclose = () => setTimeout(connectWebSocket, 3000);
+        }
+
+        const seenTrades = new Set();
+
+        function createTradeRow(t, isNew = false) {
+            const row = document.createElement("div");
+            const flashClass = isNew ? (t.match_type === "B" ? "flash-buy" : "flash-sell") : "";
+            row.className = `trade-row ${t.match_type === "B" ? "buy" : "sell"} ${flashClass}`.trim();
+            
+            const timePart = t.trade_time.includes(" ") ? t.trade_time.split(" ")[1] : t.trade_time;
+            const timeDisplay = timePart.split(".")[0];
+
+            row.innerHTML = `
+                <div class="trade-price">${formatPrice(t.price)}</div>
+                <div class="trade-qty">${formatQty(t.volume, t.symbol)}</div>
+                <div class="trade-time">${timeDisplay}</div>
+            `;
+            return row;
+        }
+
+        function appendTrades(ticks) {
+            const container = document.getElementById("trades-tape");
+            const filtered = ticks.filter(t => t.symbol === currentSymbol);
+            if (!filtered || filtered.length === 0) return;
+
+            filtered.forEach(t => {
+                const key = `${t.symbol}_${t.trade_time}_${t.price}_${t.volume}`;
+                if (seenTrades.has(key)) return;
+                seenTrades.add(key);
+
+                const row = createTradeRow(t, true);
+                container.insertBefore(row, container.firstChild);
+                if (container.children.length > 50) {
+                    container.removeChild(container.lastChild);
+                }
+            });
+
+            if (seenTrades.size > 200) {
+                const arr = Array.from(seenTrades);
+                arr.slice(0, 100).forEach(k => seenTrades.delete(k));
+            }
+        }
+
+        async function fetchTradesForSymbol(symbol) {
+            try {
+                const baseCoin = symbol.replace("USDT", "");
+                document.getElementById("tape-symbol-title").textContent = `Thị Trường Giao Dịch (${baseCoin}/USDT)`;
+                document.getElementById("tape-vol-header").textContent = `Số lượng (${baseCoin})`;
+                
+                const container = document.getElementById("trades-tape");
+                container.innerHTML = "";
+                seenTrades.clear();
+
+                const res = await fetch(`/api/v1/market-data/ticks?symbol=${symbol}&limit=50`);
+                const data = await res.json();
+                if (data.data) {
+                    data.data.forEach(t => {
+                        const key = `${t.symbol}_${t.trade_time}_${t.price}_${t.volume}`;
+                        seenTrades.add(key);
+                        const row = createTradeRow(t, false);
+                        container.appendChild(row);
+                    });
+                }
+            } catch (e) {
+                console.error("Lỗi nạp trades theo mã:", e);
+            }
+        }
+
+        window.onload = async () => {
+            initCandleChart();
+            initECharts();
+            await fetchSymbols();
+            await fetchCandles(currentSymbol, currentTimeframe, true);
+            await fetchAnalytics(currentSymbol);
+            await fetchTradesForSymbol(currentSymbol);
+            connectWebSocket();
+
+            setInterval(() => {
+                fetchCandles(currentSymbol, currentTimeframe, false);
+                fetchAnalytics(currentSymbol);
+            }, 1000);
+        };
+    </script>
+</body>
+</html>
