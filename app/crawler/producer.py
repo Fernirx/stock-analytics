@@ -1,16 +1,24 @@
 import json
 import logging
+import os
 import time
 from kafka import KafkaProducer
 from app.core.config import settings
 from app.core.schemas.tick import TickSchema
 from app.crawler.vnstock_client import VnstockClient
 
+# Tắt log chi tiết của kafka-python
+logging.getLogger("kafka").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CrawlerProducer")
 
 def get_kafka_producer():
-    candidate_servers = [settings.KAFKA_BOOTSTRAP_SERVERS, f"localhost:{settings.KAFKA_PORT}"]
+    is_docker = os.path.exists("/.dockerenv")
+    if is_docker:
+        candidate_servers = [settings.KAFKA_BOOTSTRAP_SERVERS, f"localhost:{settings.KAFKA_PORT}"]
+    else:
+        candidate_servers = [f"localhost:{settings.KAFKA_PORT}", settings.KAFKA_BOOTSTRAP_SERVERS]
+
     for server in candidate_servers:
         try:
             producer = KafkaProducer(
@@ -39,7 +47,7 @@ def run_crawler():
             for tick_data in ticks:
                 tick = TickSchema(**tick_data)
                 payload = tick.model_dump(mode="json")
-                producer.send(topic, value=payload)
+                producer.send(topic, key=tick.symbol.encode("utf-8"), value=payload)
                 logger.info(f"Sent tick: {tick.symbol} | Price: {tick.price} | Time: {tick.trade_time}")
 
             producer.flush()

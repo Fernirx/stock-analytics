@@ -1,10 +1,16 @@
 import argparse
 import json
+import logging
 import os
 import random
 import sys
 import time
 from datetime import datetime
+
+# Tắt log rác từ các thư viện kafka và urllib3
+logging.getLogger("kafka").setLevel(logging.ERROR)
+logging.getLogger("urllib3").setLevel(logging.ERROR)
+logging.getLogger("clickhouse_connect").setLevel(logging.ERROR)
 
 # Đảm bảo import được module app khi chạy file trực tiếp
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -71,7 +77,7 @@ def run_benchmark(count: int = 5000):
             "match_type": side,
             "trade_time": now_str,
         }
-        producer.send(settings.KAFKA_TOPIC_TICKS, value=payload)
+        producer.send(settings.KAFKA_TOPIC_TICKS, key=sym.encode("utf-8"), value=payload)
 
     producer.flush()
     elapsed = max(0.001, time.time() - start_time)

@@ -54,7 +54,7 @@ def test_kafka_to_clickhouse_ingestion():
         "trade_time": now_str,
     }
 
-    producer.send(settings.KAFKA_TOPIC_TICKS, value=payload)
+    producer.send(settings.KAFKA_TOPIC_TICKS, key=test_symbol.encode("utf-8"), value=payload)
     producer.flush()
 
     query = f"""
