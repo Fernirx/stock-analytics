@@ -1,16 +1,16 @@
 services:
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: stock_app
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
-      - ./app:/workspace/app
-      - ./web:/workspace/web
+      - ../app:/workspace/app
+      - ../web:/workspace/web
     env_file:
-      - .env
+      - ../.env
     environment:
       TZ: Asia/Ho_Chi_Minh
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
@@ -28,17 +28,17 @@ services:
 
   crawler:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: stock_crawler
     volumes:
-      - ./app:/workspace/app
+      - ../app:/workspace/app
     env_file:
-      - .env
+      - ../.env
     environment:
       TZ: Asia/Ho_Chi_Minh
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
-      CRAWL_INTERVAL_SECONDS: ${CRAWL_INTERVAL_SECONDS:-5}
+      CRAWL_INTERVAL_SECONDS: ${CRAWL_INTERVAL_SECONDS:-2}
     depends_on:
       - kafka
     networks:
@@ -94,7 +94,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - ./docker/clickhouse/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+      - ./clickhouse/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
       - clickhouse_data:/var/lib/clickhouse
     depends_on:
       - kafka
