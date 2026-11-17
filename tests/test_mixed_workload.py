@@ -48,11 +48,27 @@ def get_percentile(data: list, p: float) -> float:
     return float(d0 + d1)
 
 
-def execute_api_dashboard_request(base_url: str, symbol: str = "BTCUSDT", session: requests.Session = None) -> float:
-    """Thực thi gọi REST API Overview của FastAPI và đo Round-Trip Latency (ms)."""
+def execute_random_api_request(base_url: str, symbol: str = "BTCUSDT", session: requests.Session = None) -> float:
+    """Thực thi ngẫu nhiên các REST APIs thực tế của Dashboard và đo Round-Trip Latency (ms)."""
     s = session or requests
     t0 = time.time()
-    res = s.get(f"{base_url}/api/v1/analytics/overview?symbol={symbol}", timeout=10)
+
+    # Luân phiên gọi đa dạng các endpoints thực tế của Dashboard
+    endpoint_type = random.choices(
+        ["overview", "candles", "ticks", "symbols"],
+        weights=[50, 25, 20, 5],
+        k=1
+    )[0]
+
+    if endpoint_type == "overview":
+        res = s.get(f"{base_url}/api/v1/analytics/overview?symbol={symbol}", timeout=10)
+    elif endpoint_type == "candles":
+        res = s.get(f"{base_url}/api/v1/market-data/candles/{symbol}?timeframe=1m&limit=60", timeout=10)
+    elif endpoint_type == "ticks":
+        res = s.get(f"{base_url}/api/v1/market-data/ticks?symbol={symbol}&limit=50", timeout=10)
+    else:
+        res = s.get(f"{base_url}/api/v1/market-data/symbols", timeout=10)
+
     res.raise_for_status()
     return (time.time() - t0) * 1000.0
 
@@ -66,7 +82,10 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
 
     admin = KafkaAdminClient(bootstrap_servers=server)
     consumer = KafkaConsumer(bootstrap_servers=server)
-    tp = TopicPartition(topic, 0)
+
+    # Tự động phát hiện và theo dõi toàn bộ các partitions của topic (hiện tại là 4 partitions)
+    partition_ids = consumer.partitions_for_topic(topic) or {0, 1, 2, 3}
+    tps = [TopicPartition(topic, p) for p in sorted(partition_ids)]
 
     symbols = {
         "BTCUSDT": 69200.0, "ETHUSDT": 1950.0, "SOLUSDT": 135.0, "BNBUSDT": 590.0,
@@ -76,18 +95,20 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
 
     print("\n" + "=" * 76)
     print("        BẮT ĐẦU KIỂM THỬ TẢI HỖN HỢP THỰC TẾ (MIXED WORKLOAD BENCHMARK)")
-    print(f"        Mục tiêu đo: FastAPI REST API Latency + ClickHouse Ingestion")
-    print(f"        Target Endpoint: {base_url}/api/v1/analytics/overview")
+    print(f"        Kiến trúc: Kafka 4 Partitions + ClickHouse 4 Consumers")
+    print(f"        Đo lường: Full Suite REST APIs (Overview, Candles, Ticks, Symbols)")
+    print(f"        Target Server: {base_url}")
     print("=" * 76)
 
     # ---------------------------------------------------------
     # PHA 1: ĐO BASELINE (CHỈ ĐỌC API KHI HỆ THỐNG RẢNH)
     # ---------------------------------------------------------
-    print(f"\n[Pha 1] Đang đo Baseline API Latency ({read_iterations} lần gọi API khi không có luồng ghi)...")
+    print(f"\n[Pha 1] Đang đo Baseline API Latency ({read_iterations} lần gọi đa API khi không có luồng ghi)...")
     baseline_latencies = []
     base_session = requests.Session()
     for _ in range(read_iterations):
-        lat = execute_api_dashboard_request(base_url, symbol="BTCUSDT", session=base_session)
+        sym = random.choice(sym_list)
+        lat = execute_random_api_request(base_url, symbol=sym, session=base_session)
         baseline_latencies.append(lat)
         time.sleep(0.05)
 
@@ -97,9 +118,9 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
     print(f" -> Baseline API Latency: P50 = {base_p50:.2f}ms | P95 = {base_p95:.2f}ms | P99 = {base_p99:.2f}ms")
 
     # ---------------------------------------------------------
-    # PHA 2: CHẠY ĐỒNG THỜI LUỒNG GHI VÀ LUỒNG ĐỌC API (UNDER LOAD)
+    # PHA 2: CHẠY ĐỒNG THỜI LUỒNG GHI VÀ LUỒNG ĐỌC ĐA API (UNDER LOAD)
     # ---------------------------------------------------------
-    print(f"\n[Pha 2] Kích hoạt tải hỗn hợp: Bắn {count:,} messages (Ghi) đồng thời liên tục gọi API (Đọc)...")
+    print(f"\n[Pha 2] Kích hoạt tải hỗn hợp: Bắn {count:,} messages (Ghi) đồng thời 8 luồng gọi đa API (Đọc)...")
     load_latencies = []
     stop_read_worker = False
 
@@ -108,15 +129,15 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
         while not stop_read_worker:
             sym = random.choice(["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"])
             try:
-                lat = execute_api_dashboard_request(base_url, symbol=sym, session=worker_session)
+                lat = execute_random_api_request(base_url, symbol=sym, session=worker_session)
                 load_latencies.append(lat)
             except Exception:
                 pass
-            time.sleep(0.02)
+            time.sleep(0.01)
 
-    # Bắt đầu luồng đọc song song
-    executor = ThreadPoolExecutor(max_workers=2)
-    read_future = executor.submit(read_worker)
+    # Mở 8 luồng đọc đồng thời
+    executor = ThreadPoolExecutor(max_workers=8)
+    read_futures = [executor.submit(read_worker) for _ in range(8)]
 
     # Bắt đầu luồng ghi (Producer)
     write_start = time.time()
@@ -137,21 +158,24 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
     producer_send_time = time.time() - write_start
     producer_rate = count / max(0.001, producer_send_time)
 
-    # Đợi ClickHouse nuốt sạch tin trong Kafka (Lag về 0)
+    # Đợi ClickHouse nuốt sạch tin trên CẢ 4 PARTITIONS (Tổng Lag về 0)
     drain_start = time.time()
-    while time.time() - drain_start < 25:
+    while time.time() - drain_start < 30:
         time.sleep(0.05)
         offsets = admin.list_consumer_group_offsets("clickhouse_ticks_consumer")
-        end_offsets = consumer.end_offsets([tp])
-        committed = offsets[tp].offset if tp in offsets else 0
-        lag = max(0, end_offsets[tp] - committed)
-        if lag <= 5:
+        end_offsets = consumer.end_offsets(tps)
+        total_lag = 0
+        for tp in tps:
+            committed = offsets[tp].offset if tp in offsets else 0
+            end = end_offsets.get(tp, 0)
+            total_lag += max(0, end - committed)
+        if total_lag <= 5:
             break
 
     total_ingestion_time = time.time() - write_start
     insert_throughput = count / max(0.001, total_ingestion_time)
 
-    # Dừng luồng đọc
+    # Dừng các luồng đọc
     stop_read_worker = True
     executor.shutdown(wait=True)
 
@@ -169,7 +193,7 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
         pass
     time.sleep(1.0)
 
-    # 1. Đo Rows Read & Query Latency từ system.query_log (lọc các query xuất phát từ service)
+    # 1. Đo Rows Read & Query Latency từ system.query_log
     q_log_res = client.query("""
         SELECT 
             round(avg(query_duration_ms), 2) AS avg_duration_ms,
@@ -229,14 +253,14 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
     print("\n" + "=" * 76)
     print("          BÁO CÁO KẾT QUẢ KIỂM THỬ TẢI HỖN HỢP (MIXED WORKLOAD BENCHMARK)")
     print("=" * 76)
-    print(f" [1] INSERT PERFORMANCE (GHI DỮ LIỆU)")
+    print(f" [1] INSERT PERFORMANCE (GHI DỮ LIỆU - 4 LUỒNG CONSUMER C++)")
     print(f"     [*] Tổng số messages nạp kiểm thử  : {count:,} messages")
     print(f"     [*] Producer Send Rate             : {producer_rate:,.0f} msgs/giây ({producer_send_time:.2f}s)")
     print(f"     [*] ClickHouse Insert Throughput   : {insert_throughput:,.0f} rows/giây (Toàn chu trình {total_ingestion_time:.2f}s)")
     print(f"     [*] ClickHouse Insert Latency      : Trung bình {avg_insert_latency:.1f} ms | Max {max_insert_latency} ms (đối chiếu system.part_log)")
     print(" " + "-" * 74)
-    print(f" [2] FASTAPI REST API LATENCY (ĐỘ TRỄ API OVERVIEW THỰC TẾ)")
-    print(f"     [*] Số lượt gọi API đồng thời      : {len(load_latencies)} calls")
+    print(f" [2] REST API SUITE LATENCY (ĐỘ TRỄ ĐA ENDPOINTS THỰC TẾ - 8 LUỒNG ĐỌC)")
+    print(f"     [*] Số lượt gọi API đồng thời      : {len(load_latencies):,} calls")
     print(f"     [*] BASELINE (Lúc hệ thống rảnh)   : P50 = {base_p50:.2f} ms | P95 = {base_p95:.2f} ms | P99 = {base_p99:.2f} ms")
     print(f"     [*] UNDER LOAD (Vừa Ghi vừa Đọc)   : P50 = {load_p50:.2f} ms | P95 = {load_p95:.2f} ms | P99 = {load_p99:.2f} ms")
     print(f"     [*] Mức độ ảnh hưởng do tải ghi    : +{max(0.0, load_p50 - base_p50):.2f} ms ({((load_p50 / max(0.001, base_p50)) - 1) * 100:+.1f}%)")
@@ -254,7 +278,7 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Chạy kiểm thử tải hỗn hợp (Mixed Workload Benchmark)")
+    parser = argparse.ArgumentParser(description="Chạy kiểm thử tải hỗn hợp đa luồng (Mixed Workload Benchmark)")
     parser.add_argument("--count", type=int, default=20000, help="Số lượng tin nhắn kiểm thử nạp (mặc định: 20000)")
     parser.add_argument("--reads", type=int, default=30, help="Số lượt truy vấn baseline (mặc định: 30)")
     args = parser.parse_args()

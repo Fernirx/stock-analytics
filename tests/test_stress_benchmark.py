@@ -27,14 +27,17 @@ def get_kafka_server():
     return settings.KAFKA_BOOTSTRAP_SERVERS if is_docker else f"localhost:{settings.KAFKA_PORT}"
 
 
-def get_lag(admin: KafkaAdminClient, consumer: KafkaConsumer, tp: TopicPartition, group_id: str) -> int:
-    """Đo Consumer Lag tức thời qua kết nối Kafka mở sẵn."""
+def get_lag(admin: KafkaAdminClient, consumer: KafkaConsumer, tps: list, group_id: str) -> int:
+    """Đo tổng Consumer Lag tức thời trên tất cả các partitions."""
     try:
         group_offsets = admin.list_consumer_group_offsets(group_id)
-        end_offsets = consumer.end_offsets([tp])
-        committed = group_offsets[tp].offset if tp in group_offsets else 0
-        end = end_offsets.get(tp, 0)
-        return max(0, end - committed)
+        end_offsets = consumer.end_offsets(tps)
+        total_lag = 0
+        for tp in tps:
+            committed = group_offsets[tp].offset if tp in group_offsets else 0
+            end = end_offsets.get(tp, 0)
+            total_lag += max(0, end - committed)
+        return total_lag
     except Exception:
         return 0
 
@@ -46,11 +49,13 @@ def run_benchmark(count: int = 5000):
     server = get_kafka_server()
     topic = settings.KAFKA_TOPIC_TICKS
     group_id = "clickhouse_ticks_consumer"
-    tp = TopicPartition(topic, 0)
-
     # Mở sẵn kết nối Admin và Consumer để đo mẫu siêu nhạy mỗi 50ms
     admin = KafkaAdminClient(bootstrap_servers=server)
     consumer = KafkaConsumer(bootstrap_servers=server)
+
+    # Tự động phát hiện và theo dõi toàn bộ các partitions của topic
+    partition_ids = consumer.partitions_for_topic(topic) or {0, 1, 2, 3}
+    tps = [TopicPartition(topic, p) for p in sorted(partition_ids)]
 
     symbols = {
         "BTCUSDT": 69200.0,
@@ -90,7 +95,7 @@ def run_benchmark(count: int = 5000):
     producer_rate = count / send_elapsed
 
     # Đo Peak Lag ngay khi Producer vừa gửi xong
-    peak_lag = get_lag(admin, consumer, tp, group_id)
+    peak_lag = get_lag(admin, consumer, tps, group_id)
 
     # 2. THEO DÕI CLICKHOUSE ĂN CHO ĐẾN KHI VÉT SẠCH KAFKA (LAG VỀ 0)
     drain_start = time.time()
@@ -98,7 +103,7 @@ def run_benchmark(count: int = 5000):
 
     while time.time() - drain_start < 20:  # Timeout tối đa 20s
         time.sleep(0.05)
-        current_lag = get_lag(admin, consumer, tp, group_id)
+        current_lag = get_lag(admin, consumer, tps, group_id)
         if current_lag <= 5:  # ClickHouse đã ăn hết sạch
             final_lag = current_lag
             break
