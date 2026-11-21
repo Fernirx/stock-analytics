@@ -827,6 +827,11 @@
                 const msg = JSON.parse(event.data);
                 if (msg.type === "ticks" && msg.data) {
                     appendTrades(msg.data);
+                } else if (msg.type === "candle" && msg.data) {
+                    // Nến nảy realtime trên TradingView Chart (Zero Polling)
+                    if (!msg.symbol || msg.symbol === currentSymbol) {
+                        candleSeries.update(msg.data);
+                    }
                 } else if (msg.type === "overview" && msg.data) {
                     // Nhận Overview push từ WebSocket, render tức thì không tốn HTTP query!
                     if (!msg.symbol || msg.symbol === currentSymbol) {
@@ -913,11 +918,8 @@
             await fetchTradesForSymbol(currentSymbol);
             connectWebSocket();
 
-            // KHAI TỬ POLLING OVERVIEW: Đã chuyển 100% sang nhận push qua WebSocket!
-            // Chỉ duy trì refresh nến nhẹ mỗi 5 giây cho TradingView
-            setInterval(() => {
-                fetchCandles(currentSymbol, currentTimeframe, false);
-            }, 5000);
+            // 100% REALTIME EVENT-DRIVEN STREAMING (ZERO POLLING):
+            // Không còn bất kỳ một hàm setInterval nào! Toàn bộ Ticks, Nến và Overview đều được Server push tức thì qua WebSocket!
         };
     </script>
 </body>
