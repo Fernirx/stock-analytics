@@ -1,6 +1,7 @@
-import asyncio
+import json
 from typing import Optional
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from app.api.modules.market_data.broadcaster import broadcaster
 from app.api.modules.market_data.service import MarketDataService
 
 router = APIRouter(prefix="/market-data", tags=["Market Data"])
@@ -35,25 +36,26 @@ def get_candles(
 
 @router.websocket("/ws")
 async def websocket_ticks(websocket: WebSocket):
-    """Bắn dữ liệu khớp lệnh thời gian thực cho Web Dashboard qua WebSocket dùng cơ chế Checkpoint Streaming."""
-    await websocket.accept()
-    last_time = None
+    """Bắn dữ liệu khớp lệnh và Overview thời gian thực dùng In-Memory Broadcast Hub (Zero Client DB Query)."""
+    await broadcaster.connect(websocket)
+    broadcaster.start_engine(service)
+
     try:
+        # Snapshot ban đầu: Gửi các lệnh gần nhất cho client hiển thị ngay lập tức
+        init_ticks = service.get_latest_ticks(limit=15)
+        if init_ticks:
+            await websocket.send_json({"type": "ticks", "data": list(reversed(init_ticks))})
+
+        # Client giữ kết nối chờ Server Push dữ liệu (hoàn toàn không query Database)
         while True:
+            text = await websocket.receive_text()
             try:
-                if last_time is None:
-                    # Lần đầu tiên kết nối: lấy mốc thời gian của lệnh mới nhất
-                    init_ticks = service.get_latest_ticks(limit=1)
-                    if init_ticks:
-                        last_time = init_ticks[0]["trade_time"]
-                else:
-                    # Checkpoint Streaming: chỉ lấy đúng những lệnh mới sinh ra kể từ last_time
-                    new_ticks = service.get_latest_ticks(since=last_time)
-                    if new_ticks:
-                        last_time = new_ticks[-1]["trade_time"]
-                        await websocket.send_json({"type": "ticks", "data": new_ticks})
+                msg = json.loads(text)
+                if msg.get("action") == "switch_symbol" and msg.get("symbol"):
+                    await broadcaster.set_symbol(websocket, msg["symbol"])
             except Exception:
                 pass
-            await asyncio.sleep(0.5)
     except WebSocketDisconnect:
-        pass
+        await broadcaster.disconnect(websocket)
+    except Exception:
+        await broadcaster.disconnect(websocket)

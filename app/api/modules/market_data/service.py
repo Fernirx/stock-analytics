@@ -1,8 +1,11 @@
+import logging
 from datetime import datetime
 import pandas as pd
 from vnstock import Market
 from app.core.constants import DEFAULT_SYMBOLS
 from app.core.database import get_clickhouse_client
+
+logger = logging.getLogger("MarketDataService")
 
 
 class MarketDataService:
@@ -37,7 +40,8 @@ class MarketDataService:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         order_clause = "ORDER BY trade_time ASC" if since else "ORDER BY trade_time DESC"
-        limit_clause = "" if since else f"LIMIT {limit}"
+        # Bảo vệ chặn tràn bộ nhớ: luôn có LIMIT ngay cả khi streaming theo since
+        limit_clause = f"LIMIT {limit}" if not since else "LIMIT 200"
 
         query = f"""
             SELECT 
@@ -56,80 +60,125 @@ class MarketDataService:
         return [dict(zip(columns, row)) for row in result.result_rows]
 
     def get_candles(self, symbol: str, timeframe: str = "1m", limit: int = 120):
-        """Tổng hợp nến OHLCV từ Binance và cập nhật tick realtime mới nhất từ ClickHouse."""
+        """Tổng hợp nến OHLCV: Ưu tiên bảng AggregatingMergeTree stock_candles_1m của ClickHouse."""
         tf_str = str(timeframe).lower().strip()
-        binance_tf_map = {
-            "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "60m": "1h"
+        interval_map = {
+            "1m": "INTERVAL 1 MINUTE",
+            "5m": "INTERVAL 5 MINUTE",
+            "15m": "INTERVAL 15 MINUTE",
+            "1h": "INTERVAL 1 HOUR",
+            "60m": "INTERVAL 1 HOUR",
         }
-        b_interval = binance_tf_map.get(tf_str, "1m")
+        interval_sql = interval_map.get(tf_str, "INTERVAL 1 MINUTE")
+        b_interval = tf_str if tf_str in ["1m", "5m", "15m", "1h"] else "1m"
         cache_key = f"{symbol.upper()}_{b_interval}"
         now = datetime.now()
 
-        # Giới hạn số nến chuẩn theo từng khung thời gian để chỉ lấy dữ liệu gần nhất trong ngày
         tf_limit_map = {
-            "1m": 120,   # 120 phút = 2 giờ gần nhất của hôm nay
-            "5m": 72,    # 72 nến = 6 giờ gần nhất của hôm nay
-            "15m": 48,   # 48 nến = 12 giờ gần nhất của hôm nay
+            "1m": 120,   # 120 phút = 2 giờ gần nhất
+            "5m": 72,    # 72 nến = 6 giờ gần nhất
+            "15m": 48,   # 48 nến = 12 giờ gần nhất
             "1h": 24     # 24 nến = 24 giờ qua
         }
         effective_limit = min(limit, tf_limit_map.get(b_interval, 120))
-
         candles = []
-        if cache_key in self._candle_cache and (now - self._candle_cache_time.get(cache_key, now)).total_seconds() < 3:
-            candles = list(self._candle_cache[cache_key])
-        else:
-            try:
-                df = self.market.crypto(symbol.upper()).ohlcv(interval=b_interval)
-                if hasattr(df, "empty") and not df.empty:
-                    parsed = []
-                    for _, r in df.iterrows():
-                        ts = int(pd.to_datetime(r["time"]).timestamp())
-                        op = float(r["open"])
-                        hi = float(r["high"])
-                        lo = float(r["low"])
-                        cl = float(r["close"])
-                        vo = float(r["volume"])
-                        dec = 5 if cl < 0.1 else (4 if cl < 1 else 2)
-                        parsed.append({
-                            "time": ts,
-                            "open": round(op, dec),
-                            "high": round(hi, dec),
-                            "low": round(lo, dec),
-                            "close": round(cl, dec),
-                            "volume": round(vo, 4)
-                        })
-                    self._candle_cache[cache_key] = parsed
-                    self._candle_cache_time[cache_key] = now
-                    candles = list(parsed)
-            except Exception:
-                candles = []
 
-        if not candles:
-            # Dự phòng ClickHouse nếu Binance API quá tải
-            interval_sql = "INTERVAL 1 MINUTE"
-            if b_interval == "5m": interval_sql = "INTERVAL 5 MINUTE"
-            elif b_interval == "15m": interval_sql = "INTERVAL 15 MINUTE"
-            elif b_interval == "1h": interval_sql = "INTERVAL 1 HOUR"
-
-            query = f"""
+        # -------------------------------------------------------------
+        # 1. ƯU TIÊN SỐ 1: Đọc trực tiếp từ bảng Continuous Aggregation stock_candles_1m
+        # -------------------------------------------------------------
+        try:
+            ch_candle_query = f"""
                 SELECT
-                    toUnixTimestamp(toStartOfInterval(trade_time, {interval_sql})) AS time,
-                    argMin(price, trade_time) AS open,
-                    max(price) AS high,
-                    min(price) AS low,
-                    argMax(price, trade_time) AS close,
+                    toUnixTimestamp(toStartOfInterval(candle_time, {interval_sql})) AS time,
+                    argMinMerge(open_state) AS open,
+                    max(high) AS high,
+                    min(low) AS low,
+                    argMaxMerge(close_state) AS close,
                     sum(volume) AS volume
-                FROM stock_analytics.stock_ticks
+                FROM stock_analytics.stock_candles_1m
                 WHERE symbol = %(symbol)s
                 GROUP BY time
                 ORDER BY time ASC
                 LIMIT %(limit)s
             """
-            result = self.client.query(query, parameters={"symbol": symbol.upper(), "limit": effective_limit})
-            columns = ["time", "open", "high", "low", "close", "volume"]
-            candles = [dict(zip(columns, row)) for row in result.result_rows]
+            ch_res = self.client.query(ch_candle_query, parameters={"symbol": symbol.upper(), "limit": effective_limit})
+            if ch_res and len(ch_res.result_rows) >= 3:
+                cols = ["time", "open", "high", "low", "close", "volume"]
+                candles = [
+                    {
+                        "time": int(r[0]),
+                        "open": round(float(r[1]), 5 if float(r[4]) < 0.1 else (4 if float(r[4]) < 1 else 2)),
+                        "high": round(float(r[2]), 5 if float(r[4]) < 0.1 else (4 if float(r[4]) < 1 else 2)),
+                        "low": round(float(r[3]), 5 if float(r[4]) < 0.1 else (4 if float(r[4]) < 1 else 2)),
+                        "close": round(float(r[4]), 5 if float(r[4]) < 0.1 else (4 if float(r[4]) < 1 else 2)),
+                        "volume": round(float(r[5]), 4)
+                    }
+                    for r in ch_res.result_rows
+                ]
+        except Exception as e:
+            logger.debug(f"Không thể đọc từ stock_candles_1m (chưa có bảng hoặc dữ liệu): {e}")
 
-        # Cập nhật giá nến mới nhất bằng tick gần nhất từ ClickHouse
+        # -------------------------------------------------------------
+        # 2. DỰ PHÒNG: Nếu ClickHouse mới khởi động chưa đủ nến -> lấy từ Cache / Binance
+        # -------------------------------------------------------------
+        if not candles:
+            if cache_key in self._candle_cache and (now - self._candle_cache_time.get(cache_key, now)).total_seconds() < 3:
+                candles = list(self._candle_cache[cache_key])
+            else:
+                try:
+                    df = self.market.crypto(symbol.upper()).ohlcv(interval=b_interval)
+                    if hasattr(df, "empty") and not df.empty:
+                        parsed = []
+                        for _, r in df.iterrows():
+                            ts = int(pd.to_datetime(r["time"]).timestamp())
+                            op = float(r["open"])
+                            hi = float(r["high"])
+                            lo = float(r["low"])
+                            cl = float(r["close"])
+                            vo = float(r["volume"])
+                            dec = 5 if cl < 0.1 else (4 if cl < 1 else 2)
+                            parsed.append({
+                                "time": ts,
+                                "open": round(op, dec),
+                                "high": round(hi, dec),
+                                "low": round(lo, dec),
+                                "close": round(cl, dec),
+                                "volume": round(vo, 4)
+                            })
+                        self._candle_cache[cache_key] = parsed
+                        self._candle_cache_time[cache_key] = now
+                        candles = list(parsed)
+                except Exception:
+                    candles = []
+
+        # -------------------------------------------------------------
+        # 3. DỰ PHÒNG CUỐI CÙNG: Tổng hợp trực tiếp từ bảng raw stock_ticks
+        # -------------------------------------------------------------
+        if not candles:
+            try:
+                raw_candle_query = f"""
+                    SELECT
+                        toUnixTimestamp(toStartOfInterval(trade_time, {interval_sql})) AS time,
+                        argMin(price, trade_time) AS open,
+                        max(price) AS high,
+                        min(price) AS low,
+                        argMax(price, trade_time) AS close,
+                        sum(volume) AS volume
+                    FROM stock_analytics.stock_ticks
+                    WHERE symbol = %(symbol)s
+                    GROUP BY time
+                    ORDER BY time ASC
+                    LIMIT %(limit)s
+                """
+                raw_res = self.client.query(raw_candle_query, parameters={"symbol": symbol.upper(), "limit": effective_limit})
+                columns = ["time", "open", "high", "low", "close", "volume"]
+                candles = [dict(zip(columns, row)) for row in raw_res.result_rows]
+            except Exception:
+                candles = []
+
+        # -------------------------------------------------------------
+        # 4. Cập nhật nến mới nhất bằng tick gần nhất từ ClickHouse
+        # -------------------------------------------------------------
         if candles:
             try:
                 latest_tick_query = """

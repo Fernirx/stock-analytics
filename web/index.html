@@ -617,162 +617,167 @@
             }
         }
 
-        // Fetch Full Analytics Overview
+        // Render Full Analytics Overview onto DOM & ECharts
+        function renderAnalytics(data) {
+            if (!data || !data.kpi) return;
+
+            // 1. Update KPI Cards
+            const k = data.kpi;
+            document.getElementById("kpi-last-price").textContent = `${formatPrice(k.last_price)} USDT`;
+            const changeEl = document.getElementById("kpi-change");
+            changeEl.textContent = `${k.price_change_pct >= 0 ? '+' : ''}${k.price_change_pct}%`;
+            changeEl.className = `kpi-badge ${k.price_change_pct >= 0 ? 'up' : 'down'}`;
+            document.getElementById("kpi-range").textContent = `Biên độ: ${formatPrice(k.min_price)} - ${formatPrice(k.max_price)} USDT`;
+            document.getElementById("kpi-vwap").textContent = `${formatPrice(k.vwap)} USDT`;
+            document.getElementById("kpi-volume").textContent = Number(k.total_volume).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
+            document.getElementById("kpi-trades").textContent = `${k.total_trades} lệnh`;
+
+            const tot = (k.buy_vol + k.sell_vol) || 1;
+            const buyPct = Math.round(k.buy_vol / tot * 100);
+            const sellPct = 100 - buyPct;
+            document.getElementById("kpi-buy-ratio").textContent = `${buyPct}% Mua`;
+            document.getElementById("kpi-sell-ratio").textContent = `${sellPct}% Bán`;
+            document.getElementById("buy-ratio-bar").style.width = `${buyPct}%`;
+            document.getElementById("sell-ratio-bar").style.width = `${sellPct}%`;
+
+            // 2. Update Top Bar Chart
+            const topSymbols = data.top_ranking || [];
+            topBarChart.setOption({
+                backgroundColor: "transparent",
+                tooltip: {
+                    trigger: "axis",
+                    axisPointer: { type: "shadow" },
+                    formatter: (params) => {
+                        const p = params[0];
+                        return `Mã: <b>${p.name}/USDT</b><br/>Giá trị thanh khoản: <b>${Number(p.value).toLocaleString('en-US', {maximumFractionDigits: 0})} USDT</b>`;
+                    }
+                },
+                grid: { top: 10, bottom: 20, left: 55, right: 80 },
+                xAxis: {
+                    type: "value",
+                    splitLine: { lineStyle: { color: "#1c2436" } },
+                    axisLabel: {
+                        formatter: (v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`,
+                        color: "#798399",
+                        fontSize: 9
+                    }
+                },
+                yAxis: { 
+                    type: "category", 
+                    data: topSymbols.map(s => s.symbol.replace("USDT", "")).reverse(), 
+                    axisLine: { lineStyle: { color: "#798399" } },
+                    axisLabel: { color: "#cbd5e1", fontWeight: "bold", fontSize: 11 }
+                },
+                series: [{
+                    type: "bar",
+                    data: topSymbols.map(s => s.volume).reverse(),
+                    label: {
+                        show: true,
+                        position: "right",
+                        formatter: (params) => `${Number(params.value).toLocaleString('en-US', {maximumFractionDigits: 0})} USDT`,
+                        color: "#94a3b8",
+                        fontSize: 10,
+                        fontWeight: "bold"
+                    },
+                    itemStyle: { 
+                        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                            { offset: 0, color: '#1e3a8a' },
+                            { offset: 1, color: '#2563eb' }
+                        ]),
+                        borderRadius: [0, 4, 4, 0] 
+                    }
+                }]
+            }, true);
+
+            // 3. Update Pie / Donut Chart
+            pieChart.setOption({
+                backgroundColor: "transparent",
+                tooltip: { trigger: "item" },
+                legend: { bottom: 0, textStyle: { color: "#798399" } },
+                series: [{
+                    type: "pie",
+                    radius: ["45%", "70%"],
+                    avoidLabelOverlap: false,
+                    itemStyle: { borderRadius: 6, borderColor: "#10141f", borderWidth: 2 },
+                    label: { show: false },
+                    data: [
+                        { value: k.buy_vol, name: "Mua (Buy)", itemStyle: { color: "#00c087" } },
+                        { value: k.sell_vol, name: "Bán (Sell)", itemStyle: { color: "#ff3b53" } }
+                    ]
+                }]
+            }, true);
+
+            // 4. Update Sankey Diagram
+            const sk = data.sankey;
+            if (sk && sk.links && sk.links.length > 0) {
+                sankeyChart.setOption({
+                    backgroundColor: "transparent",
+                    tooltip: { trigger: "item", triggerOn: "mousemove" },
+                    series: [{
+                        type: "sankey",
+                        layout: "none",
+                        emphasis: { focus: "adjacency" },
+                        nodeAlign: "left",
+                        data: sk.nodes,
+                        links: sk.links,
+                        lineStyle: { color: "gradient", opacity: 0.35, curveness: 0.5 },
+                        itemStyle: { color: "#2962ff", borderColor: "#10141f" },
+                        label: { color: "#e0e6f5", fontSize: 11 }
+                    }]
+                }, true);
+            }
+
+            // 5. Update Distribution Histogram
+            const dist = data.distribution || [];
+            distChart.setOption({
+                backgroundColor: "transparent",
+                grid: { top: 20, bottom: 40, left: 50, right: 10 },
+                tooltip: { 
+                    trigger: "axis",
+                    axisPointer: { type: "shadow" },
+                    formatter: (params) => {
+                        const p = params[0];
+                        return `Vùng giá: <b>${p.name} USDT</b><br/>Khối lượng: <b>${Number(p.value).toLocaleString()}</b>`;
+                    }
+                },
+                xAxis: {
+                    type: "category",
+                    data: dist.map(d => formatPrice(d.price)),
+                    axisLabel: { 
+                        color: "#94a3b8", 
+                        fontSize: 10,
+                        rotate: dist.length > 5 ? 20 : 0
+                    }
+                },
+                yAxis: { 
+                    type: "value", 
+                    splitLine: { lineStyle: { color: "#1c2436" } },
+                    axisLabel: {
+                        formatter: (v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`,
+                        color: "#798399",
+                        fontSize: 9
+                    }
+                },
+                series: [{
+                    type: "bar",
+                    data: dist.map(d => d.volume),
+                    itemStyle: { 
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: '#818cf8' },
+                            { offset: 1, color: '#4f46e5' }
+                        ]),
+                        borderRadius: [4, 4, 0, 0] 
+                    }
+                }]
+            }, true);
+        }
+
+        // Fetch Full Analytics Overview via REST (Dùng cho lần nạp đầu)
         async function fetchAnalytics(symbol) {
             try {
                 const res = await fetch(`/api/v1/analytics/overview?symbol=${symbol}`);
                 const data = await res.json();
-
-                // 1. Update KPI Cards
-                const k = data.kpi;
-                document.getElementById("kpi-last-price").textContent = `${formatPrice(k.last_price)} USDT`;
-                const changeEl = document.getElementById("kpi-change");
-                changeEl.textContent = `${k.price_change_pct >= 0 ? '+' : ''}${k.price_change_pct}%`;
-                changeEl.className = `kpi-badge ${k.price_change_pct >= 0 ? 'up' : 'down'}`;
-                document.getElementById("kpi-range").textContent = `Biên độ: ${formatPrice(k.min_price)} - ${formatPrice(k.max_price)} USDT`;
-                document.getElementById("kpi-vwap").textContent = `${formatPrice(k.vwap)} USDT`;
-                document.getElementById("kpi-volume").textContent = Number(k.total_volume).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
-                document.getElementById("kpi-trades").textContent = `${k.total_trades} lệnh`;
-
-                const tot = (k.buy_vol + k.sell_vol) || 1;
-                const buyPct = Math.round(k.buy_vol / tot * 100);
-                const sellPct = 100 - buyPct;
-                document.getElementById("kpi-buy-ratio").textContent = `${buyPct}% Mua`;
-                document.getElementById("kpi-sell-ratio").textContent = `${sellPct}% Bán`;
-                document.getElementById("buy-ratio-bar").style.width = `${buyPct}%`;
-                document.getElementById("sell-ratio-bar").style.width = `${sellPct}%`;
-
-                // 2. Update Top Bar Chart
-                const topSymbols = data.top_ranking || [];
-                topBarChart.setOption({
-                    backgroundColor: "transparent",
-                    tooltip: {
-                        trigger: "axis",
-                        axisPointer: { type: "shadow" },
-                        formatter: (params) => {
-                            const p = params[0];
-                            return `Mã: <b>${p.name}/USDT</b><br/>Giá trị thanh khoản: <b>${Number(p.value).toLocaleString('en-US', {maximumFractionDigits: 0})} USDT</b>`;
-                        }
-                    },
-                    grid: { top: 10, bottom: 20, left: 55, right: 80 },
-                    xAxis: {
-                        type: "value",
-                        splitLine: { lineStyle: { color: "#1c2436" } },
-                        axisLabel: {
-                            formatter: (v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`,
-                            color: "#798399",
-                            fontSize: 9
-                        }
-                    },
-                    yAxis: { 
-                        type: "category", 
-                        data: topSymbols.map(s => s.symbol.replace("USDT", "")).reverse(), 
-                        axisLine: { lineStyle: { color: "#798399" } },
-                        axisLabel: { color: "#cbd5e1", fontWeight: "bold", fontSize: 11 }
-                    },
-                    series: [{
-                        type: "bar",
-                        data: topSymbols.map(s => s.volume).reverse(),
-                        label: {
-                            show: true,
-                            position: "right",
-                            formatter: (params) => `${Number(params.value).toLocaleString('en-US', {maximumFractionDigits: 0})} USDT`,
-                            color: "#94a3b8",
-                            fontSize: 10,
-                            fontWeight: "bold"
-                        },
-                        itemStyle: { 
-                            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-                                { offset: 0, color: '#1e3a8a' },
-                                { offset: 1, color: '#2563eb' }
-                            ]),
-                            borderRadius: [0, 4, 4, 0] 
-                        }
-                    }]
-                }, true);
-
-                // 3. Update Pie / Donut Chart
-                pieChart.setOption({
-                    backgroundColor: "transparent",
-                    tooltip: { trigger: "item" },
-                    legend: { bottom: 0, textStyle: { color: "#798399" } },
-                    series: [{
-                        type: "pie",
-                        radius: ["45%", "70%"],
-                        avoidLabelOverlap: false,
-                        itemStyle: { borderRadius: 6, borderColor: "#10141f", borderWidth: 2 },
-                        label: { show: false },
-                        data: [
-                            { value: k.buy_vol, name: "Mua (Buy)", itemStyle: { color: "#00c087" } },
-                            { value: k.sell_vol, name: "Bán (Sell)", itemStyle: { color: "#ff3b53" } }
-                        ]
-                    }]
-                }, true);
-
-                // 4. Update Sankey Diagram
-                const sk = data.sankey;
-                if (sk && sk.links && sk.links.length > 0) {
-                    sankeyChart.setOption({
-                        backgroundColor: "transparent",
-                        tooltip: { trigger: "item", triggerOn: "mousemove" },
-                        series: [{
-                            type: "sankey",
-                            layout: "none",
-                            emphasis: { focus: "adjacency" },
-                            nodeAlign: "left",
-                            data: sk.nodes,
-                            links: sk.links,
-                            lineStyle: { color: "gradient", opacity: 0.35, curveness: 0.5 },
-                            itemStyle: { color: "#2962ff", borderColor: "#10141f" },
-                            label: { color: "#e0e6f5", fontSize: 11 }
-                        }]
-                    }, true);
-                }
-
-                // 5. Update Distribution Histogram
-                const dist = data.distribution || [];
-                distChart.setOption({
-                    backgroundColor: "transparent",
-                    grid: { top: 20, bottom: 40, left: 50, right: 10 },
-                    tooltip: { 
-                        trigger: "axis",
-                        axisPointer: { type: "shadow" },
-                        formatter: (params) => {
-                            const p = params[0];
-                            return `Vùng giá: <b>${p.name} USDT</b><br/>Khối lượng: <b>${Number(p.value).toLocaleString()}</b>`;
-                        }
-                    },
-                    xAxis: {
-                        type: "category",
-                        data: dist.map(d => formatPrice(d.price)),
-                        axisLabel: { 
-                            color: "#94a3b8", 
-                            fontSize: 10,
-                            rotate: dist.length > 5 ? 20 : 0
-                        }
-                    },
-                    yAxis: { 
-                        type: "value", 
-                        splitLine: { lineStyle: { color: "#1c2436" } },
-                        axisLabel: {
-                            formatter: (v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`,
-                            color: "#798399",
-                            fontSize: 9
-                        }
-                    },
-                    series: [{
-                        type: "bar",
-                        data: dist.map(d => d.volume),
-                        itemStyle: { 
-                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                                { offset: 0, color: '#818cf8' },
-                                { offset: 1, color: '#4f46e5' }
-                            ]),
-                            borderRadius: [4, 4, 0, 0] 
-                        }
-                    }]
-                }, true);
-
+                renderAnalytics(data);
             } catch (e) {
                 console.error("Lỗi nạp phân tích:", e);
             }
@@ -797,20 +802,36 @@
                 }
             });
 
+            // Báo cho WebSocket Server biết để stream đúng Overview của mã này
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: "switch_symbol", symbol: symbol }));
+            }
+
             fetchCandles(symbol, currentTimeframe, true);
             fetchAnalytics(symbol);
             fetchTradesForSymbol(symbol);
         }
 
-        // Connect WebSocket
+        // Connect WebSocket (Multiplexed Stream: Ticks + Realtime Overview Push)
         function connectWebSocket() {
             const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
             ws = new WebSocket(`${proto}//${window.location.host}/api/v1/market-data/ws`);
+
+            ws.onopen = () => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ action: "switch_symbol", symbol: currentSymbol }));
+                }
+            };
 
             ws.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 if (msg.type === "ticks" && msg.data) {
                     appendTrades(msg.data);
+                } else if (msg.type === "overview" && msg.data) {
+                    // Nhận Overview push từ WebSocket, render tức thì không tốn HTTP query!
+                    if (!msg.symbol || msg.symbol === currentSymbol) {
+                        renderAnalytics(msg.data);
+                    }
                 }
             };
 
@@ -892,10 +913,11 @@
             await fetchTradesForSymbol(currentSymbol);
             connectWebSocket();
 
+            // KHAI TỬ POLLING OVERVIEW: Đã chuyển 100% sang nhận push qua WebSocket!
+            // Chỉ duy trì refresh nến nhẹ mỗi 5 giây cho TradingView
             setInterval(() => {
                 fetchCandles(currentSymbol, currentTimeframe, false);
-                fetchAnalytics(currentSymbol);
-            }, 1000);
+            }, 5000);
         };
     </script>
 </body>
