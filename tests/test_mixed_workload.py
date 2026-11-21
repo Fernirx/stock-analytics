@@ -63,7 +63,8 @@ def execute_random_api_request(base_url: str, symbol: str = "BTCUSDT", session: 
     if endpoint_type == "overview":
         res = s.get(f"{base_url}/api/v1/analytics/overview?symbol={symbol}", timeout=10)
     elif endpoint_type == "candles":
-        res = s.get(f"{base_url}/api/v1/market-data/candles/{symbol}?timeframe=1m&limit=60", timeout=10)
+        tf = random.choice(["1m", "5m"])
+        res = s.get(f"{base_url}/api/v1/market-data/candles/{symbol}?timeframe={tf}&limit=60", timeout=10)
     elif endpoint_type == "ticks":
         res = s.get(f"{base_url}/api/v1/market-data/ticks?symbol={symbol}&limit=50", timeout=10)
     else:
@@ -141,7 +142,7 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
 
     # Bắt đầu luồng ghi (Producer)
     write_start = time.time()
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     for _ in range(count):
         sym = random.choice(sym_list)
@@ -202,7 +203,7 @@ def run_mixed_workload_benchmark(count: int = 20000, read_iterations: int = 30):
             round(avg(result_rows), 0) AS avg_result_rows
         FROM system.query_log
         WHERE type = 'QueryFinish' 
-          AND query LIKE '%stock_ticks%' 
+          AND (query LIKE '%stock_candles%' OR query LIKE '%stock_orderflow%' OR query LIKE '%stock_ticks%')
           AND query NOT LIKE '%system%'
           AND event_time >= now() - INTERVAL 5 MINUTE
     """).result_rows

@@ -107,3 +107,21 @@ def test_fastapi_market_data_endpoints():
     assert "sankey" in overview
     assert "distribution" in overview
     assert overview["kpi"]["total_trades"] > 0
+
+
+def test_fastapi_candles_clickhouse_endpoint():
+    """Kiểm tra endpoint nến OHLCV đọc 100% từ ClickHouse stock_candles_1m (1m & 5m)."""
+    base_url = get_api_base_url()
+    for tf in ["1m", "5m"]:
+        res = requests.get(f"{base_url}/api/v1/market-data/candles/BTCUSDT?timeframe={tf}&limit=10", timeout=5)
+        assert res.status_code == 200
+        candles = res.json().get("data", [])
+        assert len(candles) >= 1, f"Không có nến nào cho timeframe {tf}!"
+        for c in candles:
+            assert "open" in c and "high" in c and "low" in c and "close" in c and "volume" in c and "time" in c
+            assert c["high"] >= c["low"]
+            assert c["high"] >= c["open"] and c["high"] >= c["close"]
+            assert c["low"] <= c["open"] and c["low"] <= c["close"]
+        # Kiểm tra timestamp tăng dần nghiêm ngặt (Chronological Order)
+        for i in range(1, len(candles)):
+            assert candles[i]["time"] > candles[i - 1]["time"], f"Timestamp nến {tf} không tăng dần!"
