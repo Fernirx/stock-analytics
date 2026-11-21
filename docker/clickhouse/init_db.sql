@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS stock_analytics.stock_candles_1m (
     low SimpleAggregateFunction(min, Float64),
     close_state AggregateFunction(argMax, Float64, DateTime),
     volume SimpleAggregateFunction(sum, Float64),
-    trades_count SimpleAggregateFunction(sum, UInt32)
+    trades_count SimpleAggregateFunction(sum, UInt64)
 ) ENGINE = AggregatingMergeTree()
 PARTITION BY toYYYYMM(candle_time)
 ORDER BY (symbol, candle_time);
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS stock_analytics.stock_orderflow_5m (
     buy_vol Float64,         -- sumIf(volume, match_type = 'B')
     sell_vol Float64,        -- sumIf(volume, match_type = 'S')
     total_vol Float64,       -- sum(volume)
-    trades_count UInt32
+    trades_count UInt64
 ) ENGINE = SummingMergeTree((turnover, buy_vol, sell_vol, total_vol, trades_count))
 PARTITION BY toYYYYMM(bucket_time)
 ORDER BY (symbol, bucket_time);
