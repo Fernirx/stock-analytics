@@ -61,7 +61,7 @@ class MarketDataService:
         return [dict(zip(columns, row)) for row in result.result_rows]
 
     def get_candles(self, symbol: str, timeframe: str = "1m", limit: int = 120):
-        """Tổng hợp nến OHLCV Hybrid: Nền tảng 120 nến lịch sử + Nến realtime ClickHouse stock_candles_1m."""
+        """Truy vấn 100% nến OHLCV từ ClickHouse Continuous Aggregation stock_candles_1m (Zero External API)."""
         tf_str = str(timeframe).lower().strip()
         interval_map = {
             "1m": "INTERVAL 1 MINUTE",
@@ -72,56 +72,17 @@ class MarketDataService:
         }
         interval_sql = interval_map.get(tf_str, "INTERVAL 1 MINUTE")
         b_interval = tf_str if tf_str in ["1m", "5m", "15m", "1h"] else "1m"
-        cache_key = f"{symbol.upper()}_{b_interval}"
-        now = datetime.now()
 
         tf_limit_map = {
-            "1m": 120,   # 120 phút = 2 giờ gần nhất
-            "5m": 72,    # 72 nến = 6 giờ gần nhất
-            "15m": 48,   # 48 nến = 12 giờ gần nhất
-            "1h": 24     # 24 nến = 24 giờ qua
+            "1m": 120,   # 120 nến = 2 giờ
+            "5m": 72,    # 72 nến = 6 giờ
+            "15m": 48,   # 48 nến = 12 giờ
+            "1h": 24     # 24 nến = 24 giờ
         }
         effective_limit = min(limit, tf_limit_map.get(b_interval, 120))
 
-        # -------------------------------------------------------------
-        # BƯỚC 1: Lấy nến lịch sử nền tảng từ Cache / Binance (120 nến mượt mà)
-        # -------------------------------------------------------------
-        history_candles = []
-        if cache_key in self._candle_cache and (now - self._candle_cache_time.get(cache_key, now)).total_seconds() < 5:
-            history_candles = list(self._candle_cache[cache_key])
-        else:
-            try:
-                df = self.market.crypto(symbol.upper()).ohlcv(interval=b_interval)
-                if hasattr(df, "empty") and not df.empty:
-                    parsed = []
-                    for _, r in df.iterrows():
-                        ts = int(pd.to_datetime(r["time"]).timestamp())
-                        op = float(r["open"])
-                        hi = float(r["high"])
-                        lo = float(r["low"])
-                        cl = float(r["close"])
-                        vo = float(r["volume"])
-                        dec = 5 if cl < 0.1 else (4 if cl < 1 else 2)
-                        parsed.append({
-                            "time": ts,
-                            "open": round(op, dec),
-                            "high": round(hi, dec),
-                            "low": round(lo, dec),
-                            "close": round(cl, dec),
-                            "volume": round(vo, 4)
-                        })
-                    self._candle_cache[cache_key] = parsed
-                    self._candle_cache_time[cache_key] = now
-                    history_candles = list(parsed)
-            except Exception as e:
-                logger.debug(f"Lỗi nạp nến lịch sử Binance: {e}")
-
-        # -------------------------------------------------------------
-        # BƯỚC 2: Lấy nến realtime mới nhất từ ClickHouse stock_candles_1m
-        # -------------------------------------------------------------
-        realtime_candles = []
-        try:
-            ch_candle_query = f"""
+        ch_candle_query = f"""
+            SELECT * FROM (
                 SELECT
                     toUnixTimestamp(toStartOfInterval(candle_time, {interval_sql})) AS time,
                     argMinMerge(open_state) AS open,
@@ -132,15 +93,18 @@ class MarketDataService:
                 FROM stock_analytics.stock_candles_1m
                 WHERE symbol = %(symbol)s
                 GROUP BY time
-                ORDER BY time ASC
+                ORDER BY time DESC
                 LIMIT %(limit)s
-            """
+            ) ORDER BY time ASC
+        """
+        candles = []
+        try:
             ch_res = self.client.query(ch_candle_query, parameters={"symbol": symbol.upper(), "limit": effective_limit})
             if ch_res and ch_res.result_rows:
                 for r in ch_res.result_rows:
                     cl = float(r[4])
                     dec = 5 if cl < 0.1 else (4 if cl < 1 else 2)
-                    realtime_candles.append({
+                    candles.append({
                         "time": int(r[0]),
                         "open": round(float(r[1]), dec),
                         "high": round(float(r[2]), dec),
@@ -149,32 +113,15 @@ class MarketDataService:
                         "volume": round(float(r[5]), 4)
                     })
         except Exception as e:
-            logger.debug(f"Không thể đọc từ stock_candles_1m: {e}")
+            logger.error(f"Lỗi query nến từ ClickHouse: {e}")
 
-        # -------------------------------------------------------------
-        # BƯỚC 3: Ghép 2 tập nến (Merge & Override)
-        # Nến ClickHouse realtime đè lên các cây nến mới nhất
-        # -------------------------------------------------------------
-        candle_dict = {}
-        for c in history_candles:
-            candle_dict[c["time"]] = c
-        for c in realtime_candles:
-            candle_dict[c["time"]] = c
-
-        if candle_dict:
-            candles = sorted(candle_dict.values(), key=lambda x: x["time"])
-        else:
-            candles = []
-
-        # -------------------------------------------------------------
-        # BƯỚC 4: Cập nhật giá nến mới nhất bằng tick gần nhất từ ClickHouse
-        # -------------------------------------------------------------
+        # Cập nhật giá nến mới nhất bằng tick gần nhất từ ClickHouse
         if candles:
             try:
                 latest_tick_query = """
                     SELECT price, volume FROM stock_analytics.stock_ticks
                     WHERE symbol = %(symbol)s
-                    ORDER BY trade_time DESC
+                    ORDER BY stock_ticks.trade_time DESC
                     LIMIT 1
                 """
                 last_res = self.client.query(latest_tick_query, parameters={"symbol": symbol.upper()}).result_rows
@@ -189,4 +136,4 @@ class MarketDataService:
             except Exception:
                 pass
 
-        return candles[-effective_limit:]
+        return candles

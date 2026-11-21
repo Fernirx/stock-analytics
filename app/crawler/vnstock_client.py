@@ -77,6 +77,60 @@ class VnstockClient:
             logger.warning(f"[{symbol}] Lỗi khi kéo ticks từ Binance API: {e}")
             return ticks
 
+    def fetch_historical_ticks_for_seeding(self, limit: int = 120):
+        """Kéo dữ liệu nến lịch sử từ Binance và chuyển đổi thành luồng tick mồi bắn vào Kafka."""
+        all_seed_ticks = []
+        for symbol in self.symbols:
+            try:
+                df = self.market.crypto(symbol).ohlcv(interval="1m")
+                if not hasattr(df, "empty") or df.empty:
+                    continue
+                selected = df.tail(limit)
+                for _, row in selected.iterrows():
+                    raw_time = row.get("time")
+                    dt = pd.to_datetime(raw_time)
+                    if dt.tzinfo is not None:
+                        dt = dt.tz_convert("UTC").tz_localize(None)
+                    c_time = dt.to_pydatetime()
+
+                    op = float(row.get("open") or 0)
+                    hi = float(row.get("high") or 0)
+                    lo = float(row.get("low") or 0)
+                    cl = float(row.get("close") or 0)
+                    vo = float(row.get("volume") or 0)
+                    v_part = round(vo / 4.0, 4)
+
+                    if op <= 0:
+                        continue
+
+                    # Tạo 4 tick chuẩn Open, Low, High, Close để ClickHouse AggregatingMergeTree tái tạo chính xác 100% nến
+                    all_seed_ticks.append({
+                        "symbol": symbol, "price": op, "volume": v_part,
+                        "match_type": "B" if cl >= op else "S",
+                        "trade_time": c_time + pd.Timedelta(seconds=0)
+                    })
+                    all_seed_ticks.append({
+                        "symbol": symbol, "price": lo, "volume": v_part,
+                        "match_type": "S",
+                        "trade_time": c_time + pd.Timedelta(seconds=15)
+                    })
+                    all_seed_ticks.append({
+                        "symbol": symbol, "price": hi, "volume": v_part,
+                        "match_type": "B",
+                        "trade_time": c_time + pd.Timedelta(seconds=30)
+                    })
+                    all_seed_ticks.append({
+                        "symbol": symbol, "price": cl, "volume": v_part,
+                        "match_type": "B" if cl >= op else "S",
+                        "trade_time": c_time + pd.Timedelta(seconds=45)
+                    })
+            except Exception as e:
+                logger.warning(f"[{symbol}] Lỗi kéo nến mồi lịch sử: {e}")
+
+        # Sắp xếp theo thứ tự thời gian tăng dần để Kafka nạp tuần tự
+        all_seed_ticks.sort(key=lambda x: x["trade_time"])
+        return all_seed_ticks
+
     def fetch_latest_ticks(self):
         """Kéo dữ liệu khớp lệnh đồng thời cho các mã được cấu hình bằng ThreadPool."""
         ticks = []

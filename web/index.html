@@ -487,6 +487,7 @@
         let currentTimeframe = "1m";
         let tvChart = null;
         let candleSeries = null;
+        let activeCandle = null;
         let topBarChart = null;
         let pieChart = null;
         let sankeyChart = null;
@@ -617,13 +618,10 @@
                 const res = await fetch(`/api/v1/market-data/candles/${symbol}?timeframe=${tf}`);
                 const json = await res.json();
                 if (json.data && json.data.length > 0) {
+                    candleSeries.setData(json.data);
+                    activeCandle = { ...json.data[json.data.length - 1] };
                     if (isInit) {
-                        candleSeries.setData(json.data);
                         tvChart.timeScale().fitContent();
-                    } else {
-                        // Cập nhật nến mới nhất
-                        const latest = json.data[json.data.length - 1];
-                        candleSeries.update(latest);
                     }
                 }
             } catch (e) {
@@ -841,11 +839,6 @@
                 const msg = JSON.parse(event.data);
                 if (msg.type === "ticks" && msg.data) {
                     appendTrades(msg.data);
-                } else if (msg.type === "candle" && msg.data) {
-                    // Nến nảy realtime trên TradingView Chart (Zero Polling)
-                    if (!msg.symbol || msg.symbol === currentSymbol) {
-                        candleSeries.update(msg.data);
-                    }
                 } else if (msg.type === "overview" && msg.data) {
                     // Nhận Overview push từ WebSocket, render tức thì không tốn HTTP query!
                     if (!msg.symbol || msg.symbol === currentSymbol) {
@@ -874,12 +867,49 @@
             return row;
         }
 
+        function updateCandleWithTick(t) {
+            if (!activeCandle || !candleSeries) return;
+            const tfSecMap = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600 };
+            const tfSec = tfSecMap[currentTimeframe] || 60;
+
+            const timeStr = t.trade_time ? (t.trade_time.replace(" ", "T") + "Z") : "";
+            const tickTs = Math.floor(new Date(timeStr).getTime() / 1000);
+            if (!tickTs || isNaN(tickTs)) return;
+
+            const bucketTime = Math.floor(tickTs / tfSec) * tfSec;
+            const price = Number(t.price);
+            const vol = Number(t.volume || 0);
+            if (price <= 0) return;
+
+            if (bucketTime === activeCandle.time) {
+                activeCandle.high = Math.max(activeCandle.high, price);
+                activeCandle.low = Math.min(activeCandle.low, price);
+                activeCandle.close = price;
+                activeCandle.volume = +(activeCandle.volume + vol).toFixed(4);
+                candleSeries.update(activeCandle);
+            } else if (bucketTime > activeCandle.time) {
+                // Sang chu kỳ nến mới tròn số
+                activeCandle = {
+                    time: bucketTime,
+                    open: price,
+                    high: price,
+                    low: price,
+                    close: price,
+                    volume: vol
+                };
+                candleSeries.update(activeCandle);
+            }
+        }
+
         function appendTrades(ticks) {
             const container = document.getElementById("trades-tape");
             const filtered = ticks.filter(t => t.symbol === currentSymbol);
             if (!filtered || filtered.length === 0) return;
 
             filtered.forEach(t => {
+                // Cập nhật nến realtime theo từng tick
+                updateCandleWithTick(t);
+
                 const key = `${t.symbol}_${t.trade_time}_${t.price}_${t.volume}`;
                 if (seenTrades.has(key)) return;
                 seenTrades.add(key);
