@@ -47,15 +47,15 @@ class VnstockClient:
                 side = str(row.get("side") or "buy").lower()
                 match_type = "B" if "buy" in side else "S"
 
-                # Parse timestamp thực tế từ sàn Binance, chuyển về múi giờ Việt Nam
+                # Parse timestamp thực tế từ sàn Binance theo chuẩn UTC gốc
                 raw_time = row.get("time")
                 if raw_time is not None:
                     dt = pd.to_datetime(raw_time)
                     if dt.tzinfo is not None:
-                        dt = dt.tz_convert("Asia/Ho_Chi_Minh").tz_localize(None)
+                        dt = dt.tz_convert("UTC").tz_localize(None)
                     trade_time = dt.to_pydatetime()
                 else:
-                    trade_time = datetime.now()
+                    trade_time = datetime.utcnow()
 
                 if price > 0 and volume > 0:
                     ticks.append({
