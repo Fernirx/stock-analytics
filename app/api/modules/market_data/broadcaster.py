@@ -90,8 +90,8 @@ class TickBroadcaster:
                 if not sym or price <= 0:
                     continue
 
-                # Xác định bucket nến 1 phút (làm tròn về đầu 60s)
-                dt = pd.to_datetime(raw_time)
+                # Xác định bucket nến 1 phút theo chuẩn UTC Epoch (đồng bộ tuyệt đối với nến Binance)
+                dt = pd.to_datetime(raw_time, utc=True)
                 ts = int(dt.timestamp())
                 bucket_time = (ts // 60) * 60
                 dec = 5 if price < 0.1 else (4 if price < 1.0 else 2)

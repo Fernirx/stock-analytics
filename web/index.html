@@ -343,8 +343,14 @@
                 <span>THỊ TRƯỜNG TRỰC TIẾP</span>
             </div>
         </div>
-        <div class="symbol-nav" id="symbol-nav">
-            <!-- Nav buttons injected by JS -->
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div class="market-clock" id="market-clock" style="display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: #94a3b8; background: #171d2c; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border);">
+                <span style="color: #2962ff;">🕒</span>
+                <span id="live-clock-time">--:--:-- (GMT+7)</span>
+            </div>
+            <div class="symbol-nav" id="symbol-nav">
+                <!-- Nav buttons injected by JS -->
+            </div>
         </div>
     </header>
 
@@ -528,10 +534,18 @@
                 timeScale: { 
                     borderColor: "#1e293b", 
                     timeVisible: true, 
-                    secondsVisible: false 
+                    secondsVisible: false,
+                    tickMarkFormatter: (time) => {
+                        const date = new Date(time * 1000);
+                        return date.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false });
+                    }
                 },
                 localization: {
-                    priceFormatter: (p) => formatPrice(p) + " USDT"
+                    priceFormatter: (p) => formatPrice(p) + " USDT",
+                    timeFormatter: (time) => {
+                        const date = new Date(time * 1000);
+                        return date.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                    }
                 }
             });
             const pFormat = getPrecisionForSymbol(currentSymbol);
@@ -850,8 +864,7 @@
             const flashClass = isNew ? (t.match_type === "B" ? "flash-buy" : "flash-sell") : "";
             row.className = `trade-row ${t.match_type === "B" ? "buy" : "sell"} ${flashClass}`.trim();
             
-            const timePart = t.trade_time.includes(" ") ? t.trade_time.split(" ")[1] : t.trade_time;
-            const timeDisplay = timePart.split(".")[0];
+            const timeDisplay = t.trade_time_vn || (t.trade_time ? (t.trade_time.includes(" ") ? t.trade_time.split(" ")[1] : t.trade_time).split(".")[0] : "");
 
             row.innerHTML = `
                 <div class="trade-price">${formatPrice(t.price)}</div>
@@ -910,6 +923,17 @@
         }
 
         window.onload = async () => {
+            // Khởi chạy đồng hồ thị trường thời gian thực (Giờ Việt Nam GMT+7)
+            function updateMarketClock() {
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false });
+                const dateStr = now.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+                const el = document.getElementById("live-clock-time");
+                if (el) el.textContent = `${dateStr} ${timeStr} (GMT+7)`;
+            }
+            setInterval(updateMarketClock, 1000);
+            updateMarketClock();
+
             initCandleChart();
             initECharts();
             await fetchSymbols();

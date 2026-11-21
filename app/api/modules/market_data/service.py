@@ -32,31 +32,32 @@ class MarketDataService:
         conditions = []
         params = {}
         if symbol:
-            conditions.append("symbol = %(symbol)s")
+            conditions.append("stock_ticks.symbol = %(symbol)s")
             params["symbol"] = symbol
         if since:
-            conditions.append("trade_time > %(since)s")
+            conditions.append("stock_ticks.trade_time > %(since)s")
             params["since"] = since
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        order_clause = "ORDER BY trade_time ASC" if since else "ORDER BY trade_time DESC"
+        order_clause = "ORDER BY stock_ticks.trade_time ASC" if since else "ORDER BY stock_ticks.trade_time DESC"
         limit_clause = f"LIMIT {limit}" if not since else "LIMIT 200"
 
-        # Hiển thị chuẩn xác múi giờ Việt Nam Asia/Ho_Chi_Minh trên sổ lệnh
+        # Trả về cả trade_time chuẩn UTC (cho so sánh filter/since) và trade_time_vn (cho hiển thị sổ lệnh)
         query = f"""
             SELECT 
                 symbol,
                 price,
                 volume,
                 match_type,
-                toString(toTimeZone(trade_time, 'Asia/Ho_Chi_Minh')) AS trade_time
+                toString(stock_ticks.trade_time) AS trade_time,
+                substring(toString(toTimeZone(stock_ticks.trade_time, 'Asia/Ho_Chi_Minh')), 12, 8) AS trade_time_vn
             FROM stock_analytics.stock_ticks
             {where_clause}
             {order_clause}
             {limit_clause}
         """
         result = self.client.query(query, parameters=params)
-        columns = ["symbol", "price", "volume", "match_type", "trade_time"]
+        columns = ["symbol", "price", "volume", "match_type", "trade_time", "trade_time_vn"]
         return [dict(zip(columns, row)) for row in result.result_rows]
 
     def get_candles(self, symbol: str, timeframe: str = "1m", limit: int = 120):
